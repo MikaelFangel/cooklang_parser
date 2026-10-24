@@ -1,0 +1,1 @@
+alias CooklangParser, as: Cooklang
