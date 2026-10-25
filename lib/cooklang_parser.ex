@@ -19,15 +19,15 @@ defmodule CooklangParser do
 
   note =
     ignore(string(">"))
-    |> ignore(optional(string(" ")))
     |> utf8_string([not: ?\n], min: 0)
+    |> map({String, :trim, []})
     |> unwrap_and_tag(:note)
 
   comment =
     ignore(string("--"))
     |> lookahead_not(string("-"))
-    |> ignore(optional(string(" ")))
     |> utf8_string([not: ?\n], min: 0)
+    |> map({String, :trim, []})
     |> unwrap_and_tag(:comment)
 
   block_comment =
