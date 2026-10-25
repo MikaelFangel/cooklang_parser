@@ -5,34 +5,36 @@ defmodule CooklangParser do
   import NimbleParsec
 
   whitespace = ascii_string([?\s, ?\t], min: 1)
+  newline = choice([string("\r\n"), string("\n")])
+  line_content = utf8_string([not: ?\r, not: ?\n], min: 0)
 
   metadata =
-    ignore(string("---") |> optional(whitespace) |> string("\n"))
+    ignore(string("---") |> optional(whitespace) |> concat(newline))
     |> repeat(
       lookahead_not(string("---"))
-      |> utf8_string([not: ?\n], min: 0)
-      |> string("\n")
+      |> concat(line_content)
+      |> concat(newline |> replace("\n"))
     )
-    |> ignore(string("---") |> optional(whitespace) |> optional(string("\n")))
+    |> ignore(string("---") |> optional(whitespace) |> optional(newline))
     |> post_traverse({:parse_yaml, []})
     |> unwrap_and_tag(:metadata)
 
   note =
     ignore(string(">"))
-    |> utf8_string([not: ?\n], min: 0)
+    |> concat(line_content)
     |> map({String, :trim, []})
     |> unwrap_and_tag(:note)
 
   comment =
     ignore(string("--"))
     |> lookahead_not(string("-"))
-    |> utf8_string([not: ?\n], min: 0)
+    |> concat(line_content)
     |> map({String, :trim, []})
     |> unwrap_and_tag(:comment)
 
   block_comment =
     ignore(string("[-"))
-    |> repeat(lookahead_not(string("-]")) |> utf8_char([]))
+    |> repeat(lookahead_not(string("-]")) |> choice([newline, utf8_char(not: ?\r)]))
     |> ignore(string("-]"))
     |> reduce({List, :to_string, []})
     |> map({String, :trim, []})
@@ -42,7 +44,7 @@ defmodule CooklangParser do
     repeat(
       choice([
         block_comment,
-        utf8_string([not: ?=, not: ?-, not: ?[, not: ?\n], min: 1),
+        utf8_string([not: ?=, not: ?-, not: ?[, not: ?\r, not: ?\n], min: 1),
         lookahead_not(comment) |> ascii_string([?-], min: 1),
         string("[")
       ])
@@ -53,26 +55,26 @@ defmodule CooklangParser do
     |> concat(section_name)
     |> ignore(repeat(string("=")))
     |> repeat(choice([ignore(whitespace), block_comment, comment]))
-    |> lookahead(choice([string("\n"), eos()]))
+    |> lookahead(choice([newline, eos()]))
     |> post_traverse({:build_section, []})
 
   preparation =
     ignore(string("(") |> optional(whitespace))
-    |> utf8_string([not: ?\), not: ?\n], min: 1)
+    |> utf8_string([not: ?\), not: ?\r, not: ?\n], min: 1)
     |> ignore(string(")"))
     |> map({String, :trim, []})
     |> unwrap_and_tag(:preparation)
 
   quantity =
     ignore(optional(whitespace))
-    |> utf8_string([not: ?%, not: ?}, not: ?\n], min: 1)
+    |> utf8_string([not: ?%, not: ?}, not: ?\r, not: ?\n], min: 1)
     |> map({String, :trim, []})
     |> map({:parse_quantity, []})
     |> unwrap_and_tag(:quantity)
 
   unit =
     ignore(optional(whitespace))
-    |> utf8_string([not: ?}, not: ?\n], min: 1)
+    |> utf8_string([not: ?}, not: ?\r, not: ?\n], min: 1)
     |> map({String, :trim, []})
     |> unwrap_and_tag(:unit)
 
@@ -89,7 +91,7 @@ defmodule CooklangParser do
 
   multi_word_name =
     lookahead_not(utf8_char([?\s, ?\t]))
-    |> utf8_string([not: ?{, not: ?@, not: ?#, not: ?~, not: ?\n], min: 1)
+    |> utf8_string([not: ?{, not: ?@, not: ?#, not: ?~, not: ?\r, not: ?\n], min: 1)
     |> map({String, :trim_trailing, []})
     |> unwrap_and_tag(:name)
 
@@ -144,13 +146,17 @@ defmodule CooklangParser do
     |> tag(:timer)
 
   line_break =
-    string("\\\n")
+    string("\\")
+    |> concat(newline)
     |> replace("\n")
     |> unwrap_and_tag(:line_break)
 
   text =
     choice([
-      utf8_string([not: ?@, not: ?#, not: ?~, not: ?-, not: ?\\, not: ?[, not: ?\n], min: 1),
+      utf8_string(
+        [not: ?@, not: ?#, not: ?~, not: ?-, not: ?\\, not: ?[, not: ?\r, not: ?\n],
+        min: 1
+      ),
       string("@"),
       string("#"),
       string("~"),
@@ -161,14 +167,13 @@ defmodule CooklangParser do
     |> unwrap_and_tag(:text)
 
   comment_line = ignore(optional(whitespace)) |> concat(comment)
-
-  blank_line = ignore(optional(whitespace) |> string("\n"))
+  blank_line = ignore(optional(whitespace) |> concat(newline))
 
   soft_newline =
-    string("\n")
+    newline
     |> lookahead_not(
       choice([
-        optional(whitespace) |> string("\n"),
+        optional(whitespace) |> concat(newline),
         comment_line,
         string(">"),
         string("="),
