@@ -202,13 +202,15 @@ defmodule CooklangParser do
 
   step =
     times(choice([inline, soft_newline]), min: 1)
-    |> tag(:step)
+    |> reduce({:merge_text, []})
+    |> unwrap_and_tag(:step)
     |> post_traverse({:drop_empty, []})
 
   single_line_step =
     lookahead(string("="))
     |> times(inline, min: 1)
-    |> tag(:step)
+    |> reduce({:merge_text, []})
+    |> unwrap_and_tag(:step)
 
   defparsecp(
     :recipe,
@@ -285,6 +287,12 @@ defmodule CooklangParser do
 
   defp drop_empty(rest, [step: []], context, _line, _offset), do: {rest, [], context}
   defp drop_empty(rest, acc, context, _line, _offset), do: {rest, acc, context}
+
+  defp merge_text([{:text, left}, {:text, right} | items]),
+    do: merge_text([{:text, left <> right} | items])
+
+  defp merge_text([item | items]), do: [item | merge_text(items)]
+  defp merge_text([]), do: []
 
   defp parse_yaml(rest, lines, context, _line, _offset) do
     yaml = lines |> Enum.reverse() |> Enum.join()
