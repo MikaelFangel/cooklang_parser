@@ -168,20 +168,13 @@ defmodule CooklangParser do
     ])
     |> unwrap_and_tag(:text)
 
-  comment_line = ignore(optional(whitespace)) |> concat(comment)
-  blank_line = ignore(optional(whitespace) |> concat(newline))
+  empty_line =
+    repeat(choice([ignore(whitespace), comment, block_comment]))
+    |> choice([ignore(newline), eos()])
 
   soft_newline =
     newline
-    |> lookahead_not(
-      choice([
-        optional(whitespace) |> concat(newline),
-        comment_line,
-        string(">"),
-        string("="),
-        eos()
-      ])
-    )
+    |> lookahead_not(choice([empty_line, string(">"), string("=")]))
     |> replace(" ")
     |> unwrap_and_tag(:text)
 
@@ -204,7 +197,6 @@ defmodule CooklangParser do
     times(choice([inline, soft_newline]), min: 1)
     |> reduce({:merge_text, []})
     |> unwrap_and_tag(:step)
-    |> post_traverse({:drop_empty, []})
 
   single_line_step =
     lookahead(string("="))
@@ -215,7 +207,7 @@ defmodule CooklangParser do
   defparsecp(
     :recipe,
     optional(metadata)
-    |> repeat(choice([section, single_line_step, note, comment_line, blank_line, step]))
+    |> repeat(lookahead_not(eos()) |> choice([section, single_line_step, note, empty_line, step]))
     |> eos()
   )
 
@@ -284,9 +276,6 @@ defmodule CooklangParser do
     do: {rest, comment, context}
 
   defp filter_comment(rest, _comment, context, _line, _offset), do: {rest, [], context}
-
-  defp drop_empty(rest, [step: []], context, _line, _offset), do: {rest, [], context}
-  defp drop_empty(rest, acc, context, _line, _offset), do: {rest, acc, context}
 
   defp merge_text([{:text, left}, {:text, right} | items]),
     do: merge_text([{:text, left <> right} | items])
