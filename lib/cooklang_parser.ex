@@ -31,6 +31,7 @@ defmodule CooklangParser do
     |> concat(line_content)
     |> map({String, :trim, []})
     |> unwrap_and_tag(:comment)
+    |> post_traverse({:filter_comment, []})
 
   block_comment =
     ignore(string("[-"))
@@ -39,6 +40,7 @@ defmodule CooklangParser do
     |> reduce({List, :to_string, []})
     |> map({String, :trim, []})
     |> unwrap_and_tag(:comment)
+    |> post_traverse({:filter_comment, []})
 
   section_name =
     repeat(
@@ -250,19 +252,35 @@ defmodule CooklangParser do
        [
          metadata: %{"servings" => 2},
          section: "Sauce",
-         step: [text: "Simmer. ", comment: "stir often"]
+         step: [text: "Simmer. "]
        ]}
+
+      iex> CooklangParser.parse("Simmer. -- stir often", comments: true)
+      {:ok, [step: [text: "Simmer. ", comment: "stir often"]]}
 
       iex> CooklangParser.parse("---\\ntitle: [unclosed\\n---")
       {:error, "invalid YAML front matter: Unfinished flow collection"}
+
+  ## Options
+
+    * `:comments` - when `true`, keeps comments as `{:comment, text}` items.
+      Defaults to `false`.
   """
-  @spec parse(String.t()) :: {:ok, keyword()} | {:error, String.t()}
-  def parse(source) do
-    case recipe(source) do
-      {:ok, items, "", _context, _line, _offset} -> {:ok, items}
-      {:error, reason, _rest, _context, _line, _offset} -> {:error, reason}
+  @spec parse(String.t(), keyword()) :: {:ok, keyword()} | {:error, String.t()}
+  def parse(source, opts \\ []) do
+    case recipe(source, context: opts) do
+      {:ok, items, "", _context, _line, _offset} ->
+        {:ok, Enum.reject(items, &(&1 == {:step, []}))}
+
+      {:error, reason, _rest, _context, _line, _offset} ->
+        {:error, reason}
     end
   end
+
+  defp filter_comment(rest, comment, %{comments: true} = context, _line, _offset),
+    do: {rest, comment, context}
+
+  defp filter_comment(rest, _comment, context, _line, _offset), do: {rest, [], context}
 
   defp parse_yaml(rest, lines, context, _line, _offset) do
     yaml = lines |> Enum.reverse() |> Enum.join()

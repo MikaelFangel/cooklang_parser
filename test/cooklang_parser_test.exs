@@ -45,7 +45,6 @@ defmodule CooklangParserTest do
 
   defp normalize_step(items) do
     items
-    |> Enum.reject(&match?({:comment, _}, &1))
     |> Enum.map(&normalize_item/1)
     |> merge_text()
   end
