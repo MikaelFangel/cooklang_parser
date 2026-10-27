@@ -203,6 +203,7 @@ defmodule CooklangParser do
   step =
     times(choice([inline, soft_newline]), min: 1)
     |> tag(:step)
+    |> post_traverse({:drop_empty, []})
 
   single_line_step =
     lookahead(string("="))
@@ -270,7 +271,7 @@ defmodule CooklangParser do
   def parse(source, opts \\ []) do
     case recipe(source, context: opts) do
       {:ok, items, "", _context, _line, _offset} ->
-        {:ok, Enum.reject(items, &(&1 == {:step, []}))}
+        {:ok, items}
 
       {:error, reason, _rest, _context, _line, _offset} ->
         {:error, reason}
@@ -281,6 +282,9 @@ defmodule CooklangParser do
     do: {rest, comment, context}
 
   defp filter_comment(rest, _comment, context, _line, _offset), do: {rest, [], context}
+
+  defp drop_empty(rest, [step: []], context, _line, _offset), do: {rest, [], context}
+  defp drop_empty(rest, acc, context, _line, _offset), do: {rest, acc, context}
 
   defp parse_yaml(rest, lines, context, _line, _offset) do
     yaml = lines |> Enum.reverse() |> Enum.join()
