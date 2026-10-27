@@ -7,7 +7,7 @@ Cooklang parser in Elixir using nimbleparsec.
 ```elixir
 def deps do
   [
-    {:cooklang_parser, "~> 0.1.0"}
+    {:cooklang_parser, "~> 0.2.0"}
   ]
 end
 ```
