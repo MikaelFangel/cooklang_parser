@@ -19,12 +19,6 @@ defmodule CooklangParser do
     |> post_traverse({:parse_yaml, []})
     |> unwrap_and_tag(:metadata)
 
-  note =
-    ignore(string(">"))
-    |> concat(line_content)
-    |> map({String, :trim, []})
-    |> unwrap_and_tag(:note)
-
   comment =
     ignore(string("--"))
     |> lookahead_not(string("-"))
@@ -172,11 +166,22 @@ defmodule CooklangParser do
     repeat(choice([ignore(whitespace), comment, block_comment]))
     |> choice([ignore(newline), eos()])
 
-  soft_newline =
+  line_join =
     newline
-    |> lookahead_not(choice([empty_line, string(">"), string("=")]))
+    |> lookahead_not(choice([empty_line, string("=")]))
     |> replace(" ")
-    |> unwrap_and_tag(:text)
+
+  soft_newline = line_join |> unwrap_and_tag(:text)
+
+  note_line = ignore(optional(string(">") |> optional(whitespace))) |> concat(line_content)
+
+  note =
+    lookahead(string(">"))
+    |> concat(note_line)
+    |> repeat(line_join |> concat(note_line))
+    |> reduce({Enum, :join, []})
+    |> map({String, :trim, []})
+    |> unwrap_and_tag(:note)
 
   defcombinatorp(
     :inline,
