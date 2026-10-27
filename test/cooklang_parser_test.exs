@@ -43,14 +43,9 @@ defmodule CooklangParserTest do
     %{"steps" => steps, "metadata" => Keyword.get(items, :metadata, %{})}
   end
 
-  defp normalize_step(items) do
-    items
-    |> Enum.map(&normalize_item/1)
-    |> merge_text()
-  end
+  defp normalize_step(items), do: Enum.map(items, &normalize_item/1)
 
   defp normalize_item({:text, value}), do: %{"type" => "text", "value" => value}
-  defp normalize_item({:line_break, value}), do: %{"type" => "text", "value" => value}
 
   defp normalize_item({type, fields}) when type in [:ingredient, :cookware, :timer] do
     item =
@@ -63,18 +58,6 @@ defmodule CooklangParserTest do
 
   defp canonical_key(:unit), do: "units"
   defp canonical_key(key), do: Atom.to_string(key)
-
-  defp merge_text(items) do
-    items
-    |> Enum.chunk_by(&(&1["type"] == "text"))
-    |> Enum.flat_map(fn
-      [%{"type" => "text"} | _] = texts ->
-        [%{"type" => "text", "value" => Enum.map_join(texts, & &1["value"])}]
-
-      other ->
-        other
-    end)
-  end
 
   defp normalize_expected(%{"steps" => steps, "metadata" => metadata}) do
     %{
