@@ -151,7 +151,7 @@ defmodule CooklangParser do
     string("\\")
     |> concat(newline)
     |> replace("\n")
-    |> unwrap_and_tag(:line_break)
+    |> unwrap_and_tag(:text)
 
   text =
     choice([
