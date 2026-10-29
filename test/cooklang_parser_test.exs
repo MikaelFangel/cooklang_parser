@@ -34,11 +34,7 @@ defmodule CooklangParserTest do
   defp parse(source) do
     {:ok, items} = CooklangParser.parse(source)
 
-    steps =
-      for {:step, step_items} <- items,
-          step = normalize_step(step_items),
-          step != [],
-          do: step
+    steps = for {:step, step_items} <- items, do: normalize_step(step_items)
 
     %{"steps" => steps, "metadata" => Keyword.get(items, :metadata, %{})}
   end
