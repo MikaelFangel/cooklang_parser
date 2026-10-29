@@ -1,6 +1,8 @@
 defmodule CooklangParserTest do
   use ExUnit.Case, async: true
 
+  alias CooklangParser.{Cookware, Ingredient, Recipe, Section, Step, Timer}
+
   doctest CooklangParser
 
   # Canonical parser tests from https://github.com/cooklang/spec/blob/main/tests/canonical.yaml
@@ -12,6 +14,8 @@ defmodule CooklangParserTest do
     "cookware" => %{"quantity" => 1, "units" => ""},
     "timer" => %{"name" => "", "quantity" => "", "units" => ""}
   }
+
+  @types %{Ingredient => "ingredient", Cookware => "cookware", Timer => "timer"}
 
   @skipped %{
     "testMetadataMultiwordKeyWithSpaces" => "conflicts with YAML front matter parsing"
@@ -32,20 +36,25 @@ defmodule CooklangParserTest do
   end
 
   defp parse(source) do
-    {:ok, items} = CooklangParser.parse(source)
+    {:ok, %Recipe{metadata: metadata, sections: sections}} = CooklangParser.parse(source)
 
-    steps = for {:step, step_items} <- items, do: normalize_step(step_items)
+    steps =
+      for %Section{content: content} <- sections,
+          %Step{fragments: fragments} <- content,
+          do: normalize_step(fragments)
 
-    %{"steps" => steps, "metadata" => Keyword.get(items, :metadata, %{})}
+    %{"steps" => steps, "metadata" => metadata}
   end
 
-  defp normalize_step(items), do: Enum.map(items, &normalize_item/1)
+  defp normalize_step(fragments), do: Enum.map(fragments, &normalize_fragment/1)
 
-  defp normalize_item({:text, value}), do: %{"type" => "text", "value" => value}
+  defp normalize_fragment(text) when is_binary(text), do: %{"type" => "text", "value" => text}
 
-  defp normalize_item({type, fields}) when type in [:ingredient, :cookware, :timer] do
+  defp normalize_fragment(%module{} = fragment) when is_map_key(@types, module) do
     item =
-      for {key, value} <- fields, into: %{"type" => Atom.to_string(type)} do
+      for {key, value} <- Map.from_struct(fragment),
+          value != nil,
+          into: %{"type" => @types[module]} do
         {canonical_key(key), value}
       end
 
