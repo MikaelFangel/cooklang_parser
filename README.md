@@ -19,7 +19,7 @@ Cook in a #frying pan{} with @butter{10%g} for ~{3%minutes}.
 ```elixir
 def deps do
   [
-    {:cooklang_parser, "~> 0.3.0"}
+    {:cooklang_parser, "~> 0.4.0"}
   ]
 end
 ```
