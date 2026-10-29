@@ -4,6 +4,10 @@ defmodule CooklangParser do
   """
   import NimbleParsec
 
+  alias CooklangParser.{Comment, Cookware, Ingredient, Note, Recipe, Section, Step, Timer}
+
+  @type quantity :: integer() | float() | String.t()
+
   whitespace = ascii_string([?\s, ?\t], min: 1)
   newline = choice([string("\r\n"), string("\n")])
   line_content = utf8_string([not: ?\r, not: ?\n], min: 0)
@@ -24,7 +28,8 @@ defmodule CooklangParser do
     |> lookahead_not(string("-"))
     |> concat(line_content)
     |> map({String, :trim, []})
-    |> unwrap_and_tag(:comment)
+    |> unwrap_and_tag(:text)
+    |> reduce({:build_struct, [Comment]})
     |> post_traverse({:filter_comment, []})
 
   block_comment =
@@ -33,7 +38,8 @@ defmodule CooklangParser do
     |> ignore(string("-]"))
     |> reduce({List, :to_string, []})
     |> map({String, :trim, []})
-    |> unwrap_and_tag(:comment)
+    |> unwrap_and_tag(:text)
+    |> reduce({:build_struct, [Comment]})
     |> post_traverse({:filter_comment, []})
 
   section_name =
@@ -120,8 +126,7 @@ defmodule CooklangParser do
       single_word_name |> optional(amount)
     ])
     |> optional(preparation)
-    |> tag(:ingredient)
-    |> map({:resolve_reference, []})
+    |> reduce({:build_ingredient, []})
 
   cookware =
     ignore(string("#"))
@@ -130,7 +135,7 @@ defmodule CooklangParser do
       multi_word_name |> concat(amount),
       single_word_name |> optional(amount)
     ])
-    |> tag(:cookware)
+    |> reduce({:build_struct, [Cookware]})
 
   timer =
     ignore(string("~"))
@@ -139,13 +144,12 @@ defmodule CooklangParser do
       single_word_name |> optional(duration),
       duration
     ])
-    |> tag(:timer)
+    |> reduce({:build_struct, [Timer]})
 
   line_break =
     string("\\")
     |> concat(newline)
     |> replace("\n")
-    |> unwrap_and_tag(:text)
 
   text =
     choice([
@@ -160,7 +164,6 @@ defmodule CooklangParser do
       string("\\"),
       string("[")
     ])
-    |> unwrap_and_tag(:text)
 
   empty_line =
     repeat(choice([ignore(whitespace), comment, block_comment]))
@@ -171,8 +174,6 @@ defmodule CooklangParser do
     |> lookahead_not(choice([empty_line, string("=")]))
     |> replace(" ")
 
-  soft_newline = line_join |> unwrap_and_tag(:text)
-
   note_line = ignore(optional(string(">") |> optional(whitespace))) |> concat(line_content)
 
   note =
@@ -181,7 +182,8 @@ defmodule CooklangParser do
     |> repeat(line_join |> concat(note_line))
     |> reduce({Enum, :join, []})
     |> map({String, :trim, []})
-    |> unwrap_and_tag(:note)
+    |> unwrap_and_tag(:text)
+    |> reduce({:build_struct, [Note]})
 
   defcombinatorp(
     :inline,
@@ -199,21 +201,24 @@ defmodule CooklangParser do
   inline = parsec(:inline)
 
   step =
-    times(choice([inline, soft_newline]), min: 1)
+    times(choice([inline, line_join]), min: 1)
     |> reduce({:merge_text, []})
-    |> unwrap_and_tag(:step)
+    |> unwrap_and_tag(:fragments)
+    |> reduce({:build_struct, [Step]})
 
   single_line_step =
     lookahead(string("="))
     |> times(inline, min: 1)
     |> reduce({:merge_text, []})
-    |> unwrap_and_tag(:step)
+    |> unwrap_and_tag(:fragments)
+    |> reduce({:build_struct, [Step]})
 
   defparsecp(
     :recipe,
     optional(metadata)
     |> repeat(lookahead_not(eos()) |> choice([section, single_line_step, note, empty_line, step]))
     |> eos()
+    |> reduce({:build_recipe, []})
   )
 
   @doc """
@@ -223,54 +228,66 @@ defmodule CooklangParser do
 
       iex> CooklangParser.parse("Add @salt and @ground black pepper{1/2%tsp}.")
       {:ok,
-       [
-         step: [
-           text: "Add ",
-           ingredient: [name: "salt"],
-           text: " and ",
-           ingredient: [name: "ground black pepper", quantity: 0.5, unit: "tsp"],
-           text: "."
+       %CooklangParser.Recipe{
+         sections: [
+           %CooklangParser.Section{
+             content: [
+               %CooklangParser.Step{
+                 fragments: [
+                   "Add ",
+                   %CooklangParser.Ingredient{name: "salt"},
+                   " and ",
+                   %CooklangParser.Ingredient{name: "ground black pepper", quantity: 0.5, unit: "tsp"},
+                   "."
+                 ]
+               }
+             ]
+           }
          ]
-       ]}
+       }}
 
-      iex> CooklangParser.parse("Fry the @onion{1}(diced) in a #pan{} for ~{5%minutes}.")
-      {:ok,
-       [
-         step: [
-           text: "Fry the ",
-           ingredient: [name: "onion", quantity: 1, preparation: "diced"],
-           text: " in a ",
-           cookware: [name: "pan"],
-           text: " for ",
-           timer: [quantity: 5, unit: "minutes"],
-           text: "."
-         ]
-       ]}
+      iex> {:ok, recipe} =
+      ...>   CooklangParser.parse("Fry the @onion{1}(diced) in a #pan{} for ~{5%minutes}.")
+      iex> [%CooklangParser.Section{content: [step]}] = recipe.sections
+      iex> step.fragments
+      [
+        "Fry the ",
+        %CooklangParser.Ingredient{name: "onion", quantity: 1, preparation: "diced"},
+        " in a ",
+        %CooklangParser.Cookware{name: "pan"},
+        " for ",
+        %CooklangParser.Timer{quantity: 5, unit: "minutes"},
+        "."
+      ]
 
-      iex> CooklangParser.parse("---\\nservings: 2\\n---\\n= Sauce\\nSimmer. -- stir often")
-      {:ok,
-       [
-         metadata: %{"servings" => 2},
-         section: "Sauce",
-         step: [text: "Simmer. "]
-       ]}
+      iex> {:ok, recipe} =
+      ...>   CooklangParser.parse("---\\nservings: 2\\n---\\n= Sauce\\nSimmer.\\n\\n= Pasta\\nBoil.")
+      iex> recipe.metadata
+      %{"servings" => 2}
+      iex> recipe.sections
+      [
+        %CooklangParser.Section{name: "Sauce", content: [%CooklangParser.Step{fragments: ["Simmer."]}]},
+        %CooklangParser.Section{name: "Pasta", content: [%CooklangParser.Step{fragments: ["Boil."]}]}
+      ]
 
-      iex> CooklangParser.parse("Simmer. -- stir often", comments: true)
-      {:ok, [step: [text: "Simmer. ", comment: "stir often"]]}
+      iex> {:ok, recipe} = CooklangParser.parse("Simmer. -- stir often", comments: true)
+      iex> [%CooklangParser.Section{content: [step]}] = recipe.sections
+      iex> step.fragments
+      ["Simmer. ", %CooklangParser.Comment{text: "stir often"}]
 
       iex> CooklangParser.parse("---\\ntitle: [unclosed\\n---")
       {:error, "invalid YAML front matter: Unfinished flow collection"}
 
   ## Options
 
-    * `:comments` - when `true`, keeps comments as `{:comment, text}` items.
+    * `:comments` - when `true`, keeps comments as `CooklangParser.Comment` structs.
       Defaults to `false`.
   """
-  @spec parse(String.t(), keyword()) :: {:ok, keyword()} | {:error, String.t()}
+  @spec parse(String.t(), keyword()) :: {:ok, Recipe.t()} | {:error, String.t()}
   def parse(source, opts \\ []) do
     case recipe(source, context: opts) do
-      {:ok, items, "", _context, _line, _offset} ->
-        {:ok, items}
+      {:ok, [recipe], "", _context, _line, _offset} ->
+        {:ok, recipe}
 
       {:error, reason, _rest, _context, _line, _offset} ->
         {:error, reason}
@@ -282,10 +299,10 @@ defmodule CooklangParser do
 
   defp filter_comment(rest, _comment, context, _line, _offset), do: {rest, [], context}
 
-  defp merge_text([{:text, left}, {:text, right} | items]),
-    do: merge_text([{:text, left <> right} | items])
+  defp merge_text([left, right | fragments]) when is_binary(left) and is_binary(right),
+    do: merge_text([left <> right | fragments])
 
-  defp merge_text([item | items]), do: [item | merge_text(items)]
+  defp merge_text([fragment | fragments]), do: [fragment | merge_text(fragments)]
   defp merge_text([]), do: []
 
   defp parse_yaml(rest, lines, context, _line, _offset) do
@@ -305,17 +322,40 @@ defmodule CooklangParser do
 
   defp build_section(rest, acc, context, _line, _offset) do
     {comments, name_parts} =
-      acc |> Enum.reverse() |> Enum.split_with(&match?({:comment, _}, &1))
+      acc |> Enum.reverse() |> Enum.split_with(&match?(%Comment{}, &1))
 
     name = name_parts |> Enum.join() |> String.trim()
     {rest, Enum.reverse([{:section, name} | comments]), context}
   end
 
-  defp resolve_reference({:ingredient, fields} = ingredient) do
-    case Keyword.fetch!(fields, :name) do
+  defp build_recipe([{:metadata, metadata} | items]),
+    do: %Recipe{metadata: metadata, sections: group_sections(items)}
+
+  defp build_recipe(items), do: %Recipe{sections: group_sections(items)}
+
+  defp group_sections(items) do
+    items
+    |> Enum.chunk_while(%Section{}, &chunk_section/2, &{:cont, close_section(&1), nil})
+    |> Enum.reject(&(&1 == %Section{}))
+  end
+
+  defp chunk_section({:section, name}, section),
+    do: {:cont, close_section(section), %Section{name: name}}
+
+  defp chunk_section(block, section),
+    do: {:cont, %{section | content: [block | section.content]}}
+
+  defp close_section(section), do: %{section | content: Enum.reverse(section.content)}
+
+  defp build_struct(fields, module), do: struct!(module, fields)
+
+  defp build_ingredient(fields) do
+    ingredient = struct!(Ingredient, fields)
+
+    case ingredient.name do
+      # Cross reference to recipe as ingredient
       "./" <> path ->
-        name = path |> String.split("/") |> List.last()
-        {:ingredient, Keyword.replace!(fields, :name, name) ++ [reference: path]}
+        %{ingredient | name: Path.basename(path), reference: path}
 
       _name ->
         ingredient
