@@ -26,28 +26,61 @@ end
 
 ## Usage
 
+The examples below use these aliases:
+
 ```elixir
-iex> CooklangParser.parse("Add @salt and @ground black pepper{1/2%tsp}.")
+alias CooklangParser.{Comment, Ingredient, Recipe, Section, Step}
+```
+
+```elixir
+CooklangParser.parse("Add @salt and @ground black pepper{1/2%tsp}.")
 {:ok,
- [
-   step: [
-     text: "Add ",
-     ingredient: [name: "salt"],
-     text: " and ",
-     ingredient: [name: "ground black pepper", quantity: 0.5, unit: "tsp"],
-     text: "."
+ %Recipe{
+   sections: [
+     %Section{
+       content: [
+         %Step{
+           fragments: [
+             "Add ",
+             %Ingredient{name: "salt"},
+             " and ",
+             %Ingredient{name: "ground black pepper", quantity: 0.5, unit: "tsp"},
+             "."
+           ]
+         }
+       ]
+     }
    ]
- ]}
+ }}
 ```
 
 Comments are excluded from the output by default. Pass `comments: true` to keep them:
 
 ```elixir
-iex> CooklangParser.parse("Simmer. -- stir often")
-{:ok, [step: [text: "Simmer. "]]}
+CooklangParser.parse("Simmer. -- stir often")
+{:ok, %Recipe{sections: [%Section{content: [%Step{fragments: ["Simmer. "]}]}]}}
 
-iex> CooklangParser.parse("Simmer. -- stir often", comments: true)
-{:ok, [step: [text: "Simmer. ", comment: "stir often"]]}
+CooklangParser.parse("Simmer. -- stir often", comments: true)
+{:ok,
+ %Recipe{
+   sections: [
+     %Section{
+       content: [%Step{fragments: ["Simmer. ", %Comment{text: "stir often"}]}]
+     }
+   ]
+ }}
+```
+
+## AST
+
+`CooklangParser.parse/2` returns the recipe as a tree of structs:
+
+```
+Recipe
+├── metadata: map from the YAML front matter
+└── sections: [Section]
+    └── content: [Step | Note | Comment]
+        └── fragments: [String | Ingredient | Cookware | Timer | Comment]
 ```
 
 ## Spec
