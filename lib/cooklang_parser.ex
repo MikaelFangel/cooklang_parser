@@ -363,21 +363,20 @@ defmodule CooklangParser do
   end
 
   defp parse_quantity(string) do
-    with :error <- parse_number(string),
-         [_, numerator, denominator] <- Regex.run(~r{^([1-9]\d*)\s*/\s*(\d+)$}, string),
-         denominator when denominator != 0 <- String.to_integer(denominator) do
-      String.to_integer(numerator) / denominator
-    else
-      {:ok, number} -> number
-      _ -> string
+    case {Integer.parse(string), Float.parse(string)} do
+      {{integer, ""}, _} -> integer
+      {_, {float, ""}} -> float
+      _ -> parse_fraction(string)
     end
   end
 
-  defp parse_number(string) do
-    case {Integer.parse(string), Float.parse(string)} do
-      {{integer, ""}, _} -> {:ok, integer}
-      {_, {float, ""}} -> {:ok, float}
-      _ -> :error
+  defp parse_fraction(string) do
+    with [numerator, denominator] <- String.split(string, "/"),
+         {numerator, ""} <- Integer.parse(String.trim(numerator)),
+         {denominator, ""} when denominator != 0 <- Integer.parse(String.trim(denominator)) do
+      numerator / denominator
+    else
+      _ -> string
     end
   end
 end
