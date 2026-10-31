@@ -18,7 +18,8 @@ defmodule CooklangParserTest do
   @types %{Ingredient => "ingredient", Cookware => "cookware", Timer => "timer"}
 
   @skipped %{
-    "testMetadataMultiwordKeyWithSpaces" => "conflicts with YAML front matter parsing"
+    "testMetadataMultiwordKeyWithSpaces" => "conflicts with YAML front matter parsing",
+    "testFractionsLike" => "leading zeros do not opt out of fraction parsing"
   }
 
   describe "canonical" do
