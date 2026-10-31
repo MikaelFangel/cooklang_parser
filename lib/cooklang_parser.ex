@@ -371,12 +371,34 @@ defmodule CooklangParser do
   end
 
   defp parse_fraction(string) do
-    with [numerator, denominator] <- String.split(string, "/"),
-         {numerator, ""} <- Integer.parse(String.trim(numerator)),
-         {denominator, ""} when denominator != 0 <- Integer.parse(String.trim(denominator)) do
-      numerator / denominator
+    with [left, right] <- String.split(string, "/"),
+         {denominator, ""} when denominator != 0 <- Integer.parse(String.trim(right)),
+         number when is_number(number) <- mixed_number(String.split(left), denominator) do
+      number
     else
       _ -> string
     end
   end
+
+  defp mixed_number([numerator], denominator) do
+    case Integer.parse(numerator) do
+      {numerator, ""} -> numerator / denominator
+      _ -> :error
+    end
+  end
+
+  defp mixed_number([whole_number, numerator], denominator) when denominator > 0 do
+    case {Integer.parse(whole_number), Integer.parse(numerator)} do
+      {{whole_number, ""}, {numerator, ""}} when numerator >= 0 and whole_number < 0 ->
+        whole_number - numerator / denominator
+
+      {{whole_number, ""}, {numerator, ""}} when numerator >= 0 ->
+        whole_number + numerator / denominator
+
+      _ ->
+        :error
+    end
+  end
+
+  defp mixed_number(_, _), do: :error
 end
