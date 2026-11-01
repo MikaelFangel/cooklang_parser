@@ -11,6 +11,32 @@ defmodule CooklangParser do
   whitespace = ascii_string([?\s, ?\t], min: 1)
   newline = choice([string("\r\n"), string("\n")])
   line_content = utf8_string([not: ?\r, not: ?\n], min: 0)
+  digits = ascii_string([?0..?9], min: 1)
+  sign = optional(ascii_string([?+, ?-], 1))
+
+  int =
+    sign
+    |> concat(digits)
+    |> reduce({Enum, :join, []})
+    |> map({String, :to_integer, []})
+
+  float =
+    sign
+    |> concat(digits)
+    |> string(".")
+    |> concat(digits)
+    |> reduce({Enum, :join, []})
+    |> map({String, :to_float, []})
+
+  fraction =
+    int
+    |> optional(ignore(whitespace) |> integer(min: 1))
+    |> ignore(optional(whitespace) |> string("/") |> optional(whitespace))
+    |> ignore(optional(ascii_string([?0], min: 1)))
+    |> integer(min: 1)
+    |> post_traverse({:build_fraction, []})
+
+  number = choice([fraction, float, int])
 
   metadata =
     ignore(string("---") |> optional(whitespace) |> concat(newline))
@@ -23,7 +49,8 @@ defmodule CooklangParser do
     |> post_traverse({:parse_yaml, []})
     |> unwrap_and_tag(:metadata)
 
-  comment =
+  defcombinatorp(
+    :comment,
     ignore(string("--"))
     |> lookahead_not(string("-"))
     |> concat(line_content)
@@ -31,8 +58,10 @@ defmodule CooklangParser do
     |> unwrap_and_tag(:text)
     |> reduce({:build_struct, [Comment]})
     |> post_traverse({:filter_comment, []})
+  )
 
-  block_comment =
+  defcombinatorp(
+    :block_comment,
     ignore(string("[-"))
     |> repeat(lookahead_not(string("-]")) |> choice([newline, utf8_char(not: ?\r)]))
     |> ignore(string("-]"))
@@ -41,13 +70,14 @@ defmodule CooklangParser do
     |> unwrap_and_tag(:text)
     |> reduce({:build_struct, [Comment]})
     |> post_traverse({:filter_comment, []})
+  )
 
   section_name =
     repeat(
       choice([
-        block_comment,
+        parsec(:block_comment),
         utf8_string([not: ?=, not: ?-, not: ?[, not: ?\r, not: ?\n], min: 1),
-        lookahead_not(comment) |> ascii_string([?-], min: 1),
+        lookahead_not(parsec(:comment)) |> ascii_string([?-], min: 1),
         string("[")
       ])
     )
@@ -56,7 +86,7 @@ defmodule CooklangParser do
     ignore(times(string("="), min: 1))
     |> concat(section_name)
     |> ignore(repeat(string("=")))
-    |> repeat(choice([ignore(whitespace), block_comment, comment]))
+    |> repeat(choice([ignore(whitespace), parsec(:block_comment), parsec(:comment)]))
     |> lookahead(choice([newline, eos()]))
     |> post_traverse({:build_section, []})
 
@@ -67,12 +97,17 @@ defmodule CooklangParser do
     |> map({String, :trim, []})
     |> unwrap_and_tag(:preparation)
 
-  quantity =
+  defcombinatorp(
+    :quantity,
     ignore(optional(whitespace))
-    |> utf8_string([not: ?%, not: ?}, not: ?\r, not: ?\n], min: 1)
-    |> map({String, :trim, []})
-    |> map({:parse_quantity, []})
+    |> choice([
+      number
+      |> ignore(optional(whitespace))
+      |> lookahead(choice([string("%"), string("}")])),
+      utf8_string([not: ?%, not: ?}, not: ?\r, not: ?\n], min: 1) |> map({String, :trim, []})
+    ])
     |> unwrap_and_tag(:quantity)
+  )
 
   unit =
     ignore(optional(whitespace))
@@ -82,20 +117,22 @@ defmodule CooklangParser do
 
   amount =
     ignore(string("{"))
-    |> optional(quantity |> optional(ignore(string("%")) |> optional(unit)))
+    |> optional(parsec(:quantity) |> optional(ignore(string("%")) |> optional(unit)))
     |> ignore(optional(whitespace) |> string("}"))
 
   duration =
     ignore(string("{"))
-    |> concat(quantity)
+    |> concat(parsec(:quantity))
     |> optional(ignore(string("%")) |> optional(unit))
     |> ignore(optional(whitespace) |> string("}"))
 
-  multi_word_name =
+  defcombinatorp(
+    :multi_word_name,
     lookahead_not(utf8_char([?\s, ?\t]))
     |> utf8_string([not: ?{, not: ?@, not: ?#, not: ?~, not: ?\r, not: ?\n], min: 1)
     |> map({String, :trim_trailing, []})
     |> unwrap_and_tag(:name)
+  )
 
   non_word_chars =
     Enum.concat(0..0xD7FF, 0xE000..0x10FFFF)
@@ -112,8 +149,6 @@ defmodule CooklangParser do
     |> unwrap_and_tag(:name)
   )
 
-  single_word_name = parsec(:single_word_name)
-
   optional_marker =
     string("?")
     |> replace({:optional, true})
@@ -122,8 +157,8 @@ defmodule CooklangParser do
     ignore(string("@"))
     |> optional(optional_marker)
     |> choice([
-      multi_word_name |> concat(amount),
-      single_word_name |> optional(amount)
+      parsec(:multi_word_name) |> concat(amount),
+      parsec(:single_word_name) |> optional(amount)
     ])
     |> optional(preparation)
     |> reduce({:build_ingredient, []})
@@ -132,16 +167,16 @@ defmodule CooklangParser do
     ignore(string("#"))
     |> optional(optional_marker)
     |> choice([
-      multi_word_name |> concat(amount),
-      single_word_name |> optional(amount)
+      parsec(:multi_word_name) |> concat(amount),
+      parsec(:single_word_name) |> optional(amount)
     ])
     |> reduce({:build_struct, [Cookware]})
 
   timer =
     ignore(string("~"))
     |> choice([
-      multi_word_name |> concat(duration),
-      single_word_name |> optional(duration),
+      parsec(:multi_word_name) |> concat(duration),
+      parsec(:single_word_name) |> optional(duration),
       duration
     ])
     |> reduce({:build_struct, [Timer]})
@@ -165,13 +200,15 @@ defmodule CooklangParser do
       string("[")
     ])
 
-  empty_line =
-    repeat(choice([ignore(whitespace), comment, block_comment]))
+  defcombinatorp(
+    :empty_line,
+    repeat(choice([ignore(whitespace), parsec(:comment), parsec(:block_comment)]))
     |> choice([ignore(newline), eos()])
+  )
 
   line_join =
     newline
-    |> lookahead_not(choice([empty_line, string("=")]))
+    |> lookahead_not(choice([parsec(:empty_line), string("=")]))
     |> replace(" ")
 
   note_line = ignore(optional(string(">") |> optional(whitespace))) |> concat(line_content)
@@ -188,8 +225,8 @@ defmodule CooklangParser do
   defcombinatorp(
     :inline,
     choice([
-      comment,
-      block_comment,
+      parsec(:comment),
+      parsec(:block_comment),
       ingredient,
       cookware,
       timer,
@@ -198,17 +235,15 @@ defmodule CooklangParser do
     ])
   )
 
-  inline = parsec(:inline)
-
   step =
-    times(choice([inline, line_join]), min: 1)
+    times(choice([parsec(:inline), line_join]), min: 1)
     |> reduce({:merge_text, []})
     |> unwrap_and_tag(:fragments)
     |> reduce({:build_struct, [Step]})
 
   single_line_step =
     lookahead(string("="))
-    |> times(inline, min: 1)
+    |> times(parsec(:inline), min: 1)
     |> reduce({:merge_text, []})
     |> unwrap_and_tag(:fragments)
     |> reduce({:build_struct, [Step]})
@@ -216,7 +251,10 @@ defmodule CooklangParser do
   defparsecp(
     :recipe,
     optional(metadata)
-    |> repeat(lookahead_not(eos()) |> choice([section, single_line_step, note, empty_line, step]))
+    |> repeat(
+      lookahead_not(eos())
+      |> choice([section, single_line_step, note, parsec(:empty_line), step])
+    )
     |> eos()
     |> reduce({:build_recipe, []})
   )
@@ -362,43 +400,13 @@ defmodule CooklangParser do
     end
   end
 
-  defp parse_quantity(string) do
-    case {Integer.parse(string), Float.parse(string)} do
-      {{integer, ""}, _} -> integer
-      {_, {float, ""}} -> float
-      _ -> parse_fraction(string)
-    end
-  end
+  defp build_fraction(rest, [denominator, numerator], context, _line, _offset),
+    do: {rest, [numerator / denominator], context}
 
-  defp parse_fraction(string) do
-    with [left, right] <- String.split(string, "/"),
-         {denominator, ""} when denominator != 0 <- Integer.parse(String.trim(right)),
-         number when is_number(number) <- mixed_number(String.split(left), denominator) do
-      number
-    else
-      _ -> string
-    end
-  end
+  defp build_fraction(rest, [denominator, numerator, whole], context, _line, _offset)
+       when whole < 0,
+       do: {rest, [whole - numerator / denominator], context}
 
-  defp mixed_number([numerator], denominator) do
-    case Integer.parse(numerator) do
-      {numerator, ""} -> numerator / denominator
-      _ -> :error
-    end
-  end
-
-  defp mixed_number([whole_number, numerator], denominator) when denominator > 0 do
-    case {Integer.parse(whole_number), Integer.parse(numerator)} do
-      {{whole_number, ""}, {numerator, ""}} when numerator >= 0 and whole_number < 0 ->
-        whole_number - numerator / denominator
-
-      {{whole_number, ""}, {numerator, ""}} when numerator >= 0 ->
-        whole_number + numerator / denominator
-
-      _ ->
-        :error
-    end
-  end
-
-  defp mixed_number(_, _), do: :error
+  defp build_fraction(rest, [denominator, numerator, whole], context, _line, _offset),
+    do: {rest, [whole + numerator / denominator], context}
 end
