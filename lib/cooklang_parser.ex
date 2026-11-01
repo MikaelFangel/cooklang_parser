@@ -1,6 +1,15 @@
 defmodule CooklangParser do
   @moduledoc """
-  Implementation of the Cooklang spec.
+  Implementation of Cooklang.
+
+  ## Differences
+
+  These are the differences compared to the Cooklang canonical tests.
+
+    - The front matter is parsed as strict YAML, so keys need `key: value`
+      syntax. `key     :value` is an error.
+    - Leading zeros in numbers are ignored, as in maths. `{01/2}` is
+      parsed as `0.5` rather than kept as the text `"01/2"`.
   """
   import NimbleParsec
 
