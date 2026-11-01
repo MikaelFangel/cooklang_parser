@@ -30,7 +30,7 @@ defmodule CooklangParser.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.34", only: :dev, runtime: false, warn_if_outdated: true},
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false},
-      {:nimble_parsec, "~> 1.4"},
+      {:nimble_parsec, "~> 1.4", runtime: false},
       {:yaml_elixir, "~> 2.11"}
     ]
   end
