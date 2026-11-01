@@ -49,7 +49,8 @@ defmodule CooklangParser do
     |> post_traverse({:parse_yaml, []})
     |> unwrap_and_tag(:metadata)
 
-  comment =
+  defcombinatorp(
+    :comment,
     ignore(string("--"))
     |> lookahead_not(string("-"))
     |> concat(line_content)
@@ -57,8 +58,10 @@ defmodule CooklangParser do
     |> unwrap_and_tag(:text)
     |> reduce({:build_struct, [Comment]})
     |> post_traverse({:filter_comment, []})
+  )
 
-  block_comment =
+  defcombinatorp(
+    :block_comment,
     ignore(string("[-"))
     |> repeat(lookahead_not(string("-]")) |> choice([newline, utf8_char(not: ?\r)]))
     |> ignore(string("-]"))
@@ -67,13 +70,14 @@ defmodule CooklangParser do
     |> unwrap_and_tag(:text)
     |> reduce({:build_struct, [Comment]})
     |> post_traverse({:filter_comment, []})
+  )
 
   section_name =
     repeat(
       choice([
-        block_comment,
+        parsec(:block_comment),
         utf8_string([not: ?=, not: ?-, not: ?[, not: ?\r, not: ?\n], min: 1),
-        lookahead_not(comment) |> ascii_string([?-], min: 1),
+        lookahead_not(parsec(:comment)) |> ascii_string([?-], min: 1),
         string("[")
       ])
     )
@@ -82,7 +86,7 @@ defmodule CooklangParser do
     ignore(times(string("="), min: 1))
     |> concat(section_name)
     |> ignore(repeat(string("=")))
-    |> repeat(choice([ignore(whitespace), block_comment, comment]))
+    |> repeat(choice([ignore(whitespace), parsec(:block_comment), parsec(:comment)]))
     |> lookahead(choice([newline, eos()]))
     |> post_traverse({:build_section, []})
 
@@ -122,11 +126,13 @@ defmodule CooklangParser do
     |> optional(ignore(string("%")) |> optional(unit))
     |> ignore(optional(whitespace) |> string("}"))
 
-  multi_word_name =
+  defcombinatorp(
+    :multi_word_name,
     lookahead_not(utf8_char([?\s, ?\t]))
     |> utf8_string([not: ?{, not: ?@, not: ?#, not: ?~, not: ?\r, not: ?\n], min: 1)
     |> map({String, :trim_trailing, []})
     |> unwrap_and_tag(:name)
+  )
 
   non_word_chars =
     Enum.concat(0..0xD7FF, 0xE000..0x10FFFF)
@@ -143,8 +149,6 @@ defmodule CooklangParser do
     |> unwrap_and_tag(:name)
   )
 
-  single_word_name = parsec(:single_word_name)
-
   optional_marker =
     string("?")
     |> replace({:optional, true})
@@ -153,8 +157,8 @@ defmodule CooklangParser do
     ignore(string("@"))
     |> optional(optional_marker)
     |> choice([
-      multi_word_name |> concat(amount),
-      single_word_name |> optional(amount)
+      parsec(:multi_word_name) |> concat(amount),
+      parsec(:single_word_name) |> optional(amount)
     ])
     |> optional(preparation)
     |> reduce({:build_ingredient, []})
@@ -163,16 +167,16 @@ defmodule CooklangParser do
     ignore(string("#"))
     |> optional(optional_marker)
     |> choice([
-      multi_word_name |> concat(amount),
-      single_word_name |> optional(amount)
+      parsec(:multi_word_name) |> concat(amount),
+      parsec(:single_word_name) |> optional(amount)
     ])
     |> reduce({:build_struct, [Cookware]})
 
   timer =
     ignore(string("~"))
     |> choice([
-      multi_word_name |> concat(duration),
-      single_word_name |> optional(duration),
+      parsec(:multi_word_name) |> concat(duration),
+      parsec(:single_word_name) |> optional(duration),
       duration
     ])
     |> reduce({:build_struct, [Timer]})
@@ -196,13 +200,15 @@ defmodule CooklangParser do
       string("[")
     ])
 
-  empty_line =
-    repeat(choice([ignore(whitespace), comment, block_comment]))
+  defcombinatorp(
+    :empty_line,
+    repeat(choice([ignore(whitespace), parsec(:comment), parsec(:block_comment)]))
     |> choice([ignore(newline), eos()])
+  )
 
   line_join =
     newline
-    |> lookahead_not(choice([empty_line, string("=")]))
+    |> lookahead_not(choice([parsec(:empty_line), string("=")]))
     |> replace(" ")
 
   note_line = ignore(optional(string(">") |> optional(whitespace))) |> concat(line_content)
@@ -219,8 +225,8 @@ defmodule CooklangParser do
   defcombinatorp(
     :inline,
     choice([
-      comment,
-      block_comment,
+      parsec(:comment),
+      parsec(:block_comment),
       ingredient,
       cookware,
       timer,
@@ -229,17 +235,15 @@ defmodule CooklangParser do
     ])
   )
 
-  inline = parsec(:inline)
-
   step =
-    times(choice([inline, line_join]), min: 1)
+    times(choice([parsec(:inline), line_join]), min: 1)
     |> reduce({:merge_text, []})
     |> unwrap_and_tag(:fragments)
     |> reduce({:build_struct, [Step]})
 
   single_line_step =
     lookahead(string("="))
-    |> times(inline, min: 1)
+    |> times(parsec(:inline), min: 1)
     |> reduce({:merge_text, []})
     |> unwrap_and_tag(:fragments)
     |> reduce({:build_struct, [Step]})
@@ -247,7 +251,10 @@ defmodule CooklangParser do
   defparsecp(
     :recipe,
     optional(metadata)
-    |> repeat(lookahead_not(eos()) |> choice([section, single_line_step, note, empty_line, step]))
+    |> repeat(
+      lookahead_not(eos())
+      |> choice([section, single_line_step, note, parsec(:empty_line), step])
+    )
     |> eos()
     |> reduce({:build_recipe, []})
   )
