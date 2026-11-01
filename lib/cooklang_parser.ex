@@ -15,6 +15,11 @@ defmodule CooklangParser do
 
   alias CooklangParser.{Comment, Cookware, Ingredient, Note, Recipe, Section, Step, Timer}
 
+  @typedoc """
+  The amount of something without a unit.
+
+  `String.t()` is used for anything that cannot be parsed as either int or float.
+  """
   @type quantity :: integer() | float() | String.t()
 
   whitespace = ascii_string([?\s, ?\t], min: 1)
