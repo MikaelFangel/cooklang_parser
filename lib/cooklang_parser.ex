@@ -407,7 +407,7 @@ defmodule CooklangParser do
     case ingredient.name do
       # Cross reference to recipe as ingredient
       "./" <> path ->
-        %{ingredient | name: Path.basename(path), reference: path}
+        %{ingredient | name: Path.basename(path, ".cook"), reference: path}
 
       _name ->
         ingredient
